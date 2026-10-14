@@ -2,9 +2,14 @@
 import streamlit as st
 from google import genai
 
-st.set_page_config(page_title="My AI Chatbot", page_icon="🤖")
-st.title("🤖 My AI Chatbot")
-st.caption("Powered by Google Gemini")
+st.set_page_config(
+    page_title="Cognexa AI",
+    page_icon="🧠",
+    layout="centered"
+)
+
+st.title("🤖 Cognexa AI")
+st.caption("Intelligent Conversations")
 
 # Read the API key from Streamlit secrets
 try:
