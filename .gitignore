@@ -1,0 +1,5 @@
+venv/
+venv-32bit-backup/
+__pycache__/
+.env
+.streamlit/secrets.toml
