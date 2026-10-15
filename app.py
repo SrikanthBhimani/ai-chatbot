@@ -31,7 +31,7 @@ except Exception:
     st.stop()
 
 
-# Create a new conversation
+# Create a conversation when the user sends a message
 def create_chat():
     chat_id = str(uuid.uuid4())
 
@@ -43,12 +43,12 @@ def create_chat():
     st.session_state.active_chat_id = chat_id
 
 
-# Initialize conversation state
+# Initialize session state without creating an empty chat
 if "chats" not in st.session_state:
     st.session_state.chats = {}
 
 if "active_chat_id" not in st.session_state:
-    create_chat()
+    st.session_state.active_chat_id = None
 
 
 # Sidebar: New Chat and Chat History
@@ -56,13 +56,14 @@ with st.sidebar:
     st.title("🤖 Cognexa AI")
 
     if st.button("＋ New Chat", use_container_width=True):
-        create_chat()
+        # Select a blank conversation without adding it to history
+        st.session_state.active_chat_id = None
         st.rerun()
 
     st.divider()
     st.subheader("Chat History")
 
-    # Show only conversations that contain messages
+    # Display only conversations containing messages
     chat_ids = [
         chat_id
         for chat_id, chat in st.session_state.chats.items()
@@ -88,29 +89,43 @@ with st.sidebar:
             st.rerun()
 
 
-# Get the currently selected conversation
-active_chat = st.session_state.chats[
-    st.session_state.active_chat_id
-]
+# Get the selected conversation, if any
+active_chat_id = st.session_state.active_chat_id
+
+if (
+    active_chat_id is not None
+    and active_chat_id in st.session_state.chats
+):
+    active_chat = st.session_state.chats[active_chat_id]
+else:
+    active_chat = None
 
 
-# Display the selected conversation's messages
-for message in active_chat["messages"]:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# Display the selected conversation
+if active_chat is not None:
+    for message in active_chat["messages"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
 
 # Chat input
 user_message = st.chat_input("Ask me anything...")
 
 if user_message:
+    # Create a conversation only when a message is submitted
+    if active_chat is None:
+        create_chat()
+        active_chat = st.session_state.chats[
+            st.session_state.active_chat_id
+        ]
+
     # Save the user's message
     active_chat["messages"].append({
         "role": "user",
         "content": user_message
     })
 
-    # Automatically name the conversation
+    # Name the conversation using the first question
     if active_chat["title"] == "New Chat":
         active_chat["title"] = (
             user_message[:35] + "..."
@@ -145,7 +160,14 @@ if user_message:
 
     except Exception as error:
         st.error(f"Gemini request failed: {error}")
+
+        # Remove the unanswered message
         active_chat["messages"].pop()
+
+        # Reset the title if this conversation is empty
+        if not active_chat["messages"]:
+            active_chat["title"] = "New Chat"
+
         st.stop()
 
     # Save the assistant's response
