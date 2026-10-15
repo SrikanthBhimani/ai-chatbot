@@ -82,11 +82,7 @@ with st.sidebar:
             chat["title"],
             key=f"chat_{chat_id}",
             use_container_width=True,
-            type=(
-                "primary"
-                if chat_id == st.session_state.active_chat_id
-                else "secondary"
-            ),
+            type="secondary",
         ):
             st.session_state.active_chat_id = chat_id
             st.rerun()
