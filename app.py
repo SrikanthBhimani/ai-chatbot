@@ -62,8 +62,18 @@ with st.sidebar:
     st.divider()
     st.subheader("Chat History")
 
-    chat_ids = list(st.session_state.chats.keys())
+    # Show only conversations that contain messages
+    chat_ids = [
+        chat_id
+        for chat_id, chat in st.session_state.chats.items()
+        if chat["messages"]
+    ]
+
+    # Most recently created conversations first
     chat_ids.reverse()
+
+    if not chat_ids:
+        st.caption("Your conversations will appear here.")
 
     for chat_id in chat_ids:
         chat = st.session_state.chats[chat_id]
@@ -88,7 +98,7 @@ active_chat = st.session_state.chats[
 ]
 
 
-# Display this conversation's messages
+# Display the selected conversation's messages
 for message in active_chat["messages"]:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -112,7 +122,7 @@ if user_message:
             else user_message
         )
 
-    # Prepare the full conversation for Gemini
+    # Prepare conversation history for Gemini
     contents = [
         {
             "role": (
@@ -139,9 +149,6 @@ if user_message:
 
     except Exception as error:
         st.error(f"Gemini request failed: {error}")
-
-        # Remove the unanswered message, matching the
-        # behavior of your original application.
         active_chat["messages"].pop()
         st.stop()
 
@@ -151,5 +158,5 @@ if user_message:
         "content": answer
     })
 
-    # Refresh the page and sidebar
+    # Refresh the conversation and sidebar
     st.rerun()
