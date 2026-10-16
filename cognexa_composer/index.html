@@ -1,0 +1,362 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: transparent;
+    color: var(--text, #202735);
+  }
+  .composer {
+    border: 1px solid #cfd7e2;
+    border-radius: 22px;
+    padding: 12px 14px;
+    background: var(--background, #ffffff);
+    box-shadow: 0 2px 8px #18283b0a;
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    min-height: 30px;
+    max-height: 120px;
+    resize: vertical;
+    border: 0;
+    outline: none;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.5;
+    background: transparent;
+    color: inherit;
+  }	
+    #attach {
+    flex: 0 0 38px;
+    width: 38px;
+    padding: 0;
+  }
+  #mic {
+    margin-left: auto;
+    flex: 0 0 38px;
+    width: 38px;
+    padding: 0;
+  }
+  #send {
+    flex: 0 0 40px;
+    margin-left: 0;
+  }
+  .toolbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 10px;
+    min-height: 48px;
+  }
+  button {
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+  }
+  .tool {
+    height: 38px;
+    min-width: 38px;
+    padding: 0 11px;
+    border-radius: 20px;
+    background: #eef3f8;
+    color: #20334a;
+    font-size: 18px;
+  }
+  .tool:hover { background: #dfe9f3; }
+  .tool, .send {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .send {
+    margin-left: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #176b68;
+    color: white;
+    font-size: 22px;
+  }
+  .send:disabled { opacity: .4; cursor: default; }
+  .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px 0;
+  }
+  .file {
+    border-radius: 9px;
+    background: #edf2f7;
+    color: #25364a;
+    padding: 5px 9px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .hint { font-size: 12px; color: #687587; padding-top: 5px; }
+  .recording { background: #ffe4e4; color: #a31919; }
+
+/* Microphone icon — centered as one complete shape */
+.mic-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='9' y='2' width='6' height='12' rx='3' fill='black'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='9' y='2' width='6' height='12' rx='3' fill='black'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v4m-4 0h8' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* Send arrow icon */
+.send-icon {
+  display: inline-block;
+  position: relative;
+  width: 18px;
+  height: 18px;
+}
+
+.send-icon::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 3px;
+  width: 2px;
+  height: 12px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.send-icon::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+</style>
+</head>
+<body>
+<div class="composer">
+  <textarea id="message" rows="1"
+    placeholder="Ask Cognexa AI anything..."></textarea>
+
+  <div id="files" class="files"></div>
+
+  <div class="toolbar">
+    
+<button class="tool" id="attach" title="Attach files">+</button>
+<input id="picker" type="file" hidden multiple>
+
+
+    <button class="tool" id="mic" title="Record voice question"><span class="mic-icon"></span></button>
+<span id="status" class="hint"></span>
+<button class="send" id="send" title="Send message"><span class="send-icon"></span></button>
+  </div>
+</div>
+
+<script>
+  const message = document.getElementById("message");
+  const picker = document.getElementById("picker");
+  const attach = document.getElementById("attach");
+  const mic = document.getElementById("mic");
+  const send = document.getElementById("send");
+  const filesView = document.getElementById("files");
+  const status = document.getElementById("status");
+
+  let selectedFiles = [];
+  let recorder = null;
+  let recordingStream = null;
+  let audioChunks = [];
+  let busy = false;
+
+  function post(type, extra = {}) {
+    window.parent.postMessage({
+      isStreamlitMessage: true,
+      type,
+      ...extra
+    }, "*");
+  }
+
+  function showFiles() {
+    filesView.replaceChildren();
+    selectedFiles.forEach((file, index) => {
+      const item = document.createElement("span");
+      item.className = "file";
+      item.textContent = "[File] " + file.name + " ";
+
+      const remove = document.createElement("button");
+      remove.textContent = "X";
+      remove.title = "Remove file";
+      remove.style.background = "transparent";
+      remove.style.marginLeft = "5px";
+      remove.onclick = () => {
+        selectedFiles.splice(index, 1);
+        showFiles();
+      };
+
+      item.appendChild(remove);
+      filesView.appendChild(item);
+    });
+  }
+
+  function sendValue(value) {
+    if (busy) return;
+    busy = true;
+    send.disabled = true;
+    status.textContent = "Sending...";
+    post("streamlit:setComponentValue", {
+      value,
+      dataType: "json"
+    });
+  }
+
+  attach.onclick = () => picker.click();
+
+  
+picker.onchange = () => {
+    const files = Array.from(picker.files);
+
+    for (const file of files) {
+      if (!selectedFiles.some(
+        f => f.name === file.name && f.size === file.size
+      )) {
+        selectedFiles.push(file);
+      }
+    }
+
+    picker.value = "";
+    showFiles();
+    status.textContent = selectedFiles.length + " file(s) selected";
+  };
+
+
+  async function toBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function sendMessage() {
+    const text = message.value.trim();
+    if (!text && selectedFiles.length === 0) {
+      status.textContent = "Type a message or attach a file.";
+      return;
+    }
+
+    try {
+      const files = [];
+      for (const file of selectedFiles) {
+        files.push({
+          name: file.name,
+          mime_type: file.type || "application/octet-stream",
+          data: await toBase64(file)
+        });
+      }
+
+      sendValue({ text, files });
+    } catch (error) {
+      busy = false;
+      send.disabled = false;
+      status.textContent = "Could not read the selected file.";
+    }
+  }
+
+  send.onclick = sendMessage;
+
+  message.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  });
+
+  mic.onclick = async () => {
+    if (recorder && recorder.state === "recording") {
+      recorder.stop();
+      mic.classList.remove("recording");
+      mic.innerHTML = '<span class="mic-icon"></span>';
+      status.textContent = "Preparing recording...";
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = "Microphone is not available in this browser.";
+      return;
+    }
+
+    try {
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      recorder = new MediaRecorder(recordingStream);
+
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) audioChunks.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(audioChunks, {
+          type: recorder.mimeType || "audio/webm"
+        });
+        recordingStream.getTracks().forEach(track => track.stop());
+
+        const extension = blob.type.includes("ogg") ? "ogg" :
+                          blob.type.includes("mp4") ? "m4a" : "webm";
+        const audioFile = new File(
+          [blob], "voice_message." + extension, { type: blob.type }
+        );
+
+        selectedFiles.push(audioFile);
+        showFiles();
+        status.textContent = "Recording attached. Type a question or press Send.";
+      };
+
+      recorder.start();
+      mic.classList.add("recording");
+      mic.textContent = "STOP";
+      status.textContent = "Recording... click STOP to stop";
+    } catch (error) {
+      status.textContent = "Allow microphone access in your browser.";
+    }
+  };
+
+  // Tell Streamlit that this component is ready.
+  post("streamlit:componentReady", { apiVersion: 1 });
+
+  // Receive sizing/theme information and reset the composer after Python reruns it.
+  window.addEventListener("message", event => {
+    const data = event.data;
+    if (!data || data.type !== "streamlit:render") return;
+
+    const args = data.args || {};
+    document.documentElement.style.setProperty(
+      "--background", args.dark ? "#111827" : "#ffffff"
+    );
+    document.documentElement.style.setProperty(
+      "--text", args.dark ? "#f3f4f6" : "#202735"
+    );
+    busy = false;
+    send.disabled = false;
+    status.textContent = "";
+  });
+
+  post("streamlit:setFrameHeight", { height: 150 });
+</script>
+</body>
+</html>
+
+
