@@ -457,6 +457,12 @@ with st.sidebar:
        st.session_state.current_page = "images"
        st.rerun()
 
+
+    if st.button("💻  Code Assistant", use_container_width=True):
+        st.session_state.current_page = "code_assistant"
+        st.rerun()
+
+
     st.divider()
     st.subheader("◷  Chat History")
 
@@ -585,11 +591,54 @@ if st.session_state.current_page == "images":
         elif image_mode == "Edit image" and uploaded_image is None:
             st.warning("Please upload an image to edit.")
         else:
+
             try:
                 with st.spinner("Creating your image..."):
-                    image_input = prompt.strip()
+                    if image_mode == "Generate image":
+                        cloudflare_token = st.secrets[
+                            "CLOUDFLARE_API_TOKEN"
+                        ]
+                        cloudflare_account_id = (
+                            "411e02c2ac15dacd76fcf716a409ea6a"
+                        )
+                        cloudflare_url = (
+                            "https://api.cloudflare.com/client/v4/accounts/"
+                            f"{cloudflare_account_id}/ai/run/"
+                            "@cf/black-forest-labs/flux-1-schnell"
+                        )
 
-                    if image_mode == "Edit image":
+                        response = requests.post(
+                            cloudflare_url,
+                            headers={
+                                "Authorization": (
+                                    f"Bearer {cloudflare_token}"
+                                ),
+                                "Content-Type": "application/json",
+                            },
+                            json={"prompt": prompt.strip()},
+                            timeout=90,
+                        )
+
+                        if response.status_code == 429:
+                            raise RuntimeError(
+                                "Cloudflare image-generation rate limit "
+                                "reached. Please try again later."
+                            )
+
+                        response.raise_for_status()
+                        result = response.json().get("result", {})
+                        image_data = result.get("image")
+
+                        if not image_data:
+                            raise RuntimeError(
+                                "Cloudflare returned no image. "
+                                "Please try again."
+                            )
+
+                        image_bytes = base64.b64decode(image_data)
+                        image_mime_type = "image/png"
+
+                    else:
                         image_input = [
                             {
                                 "type": "text",
@@ -604,29 +653,33 @@ if st.session_state.current_page == "images":
                             },
                         ]
 
-                    interaction = client.interactions.create(
-    model="gemini-3.1-flash-image",
-    input=image_input,
-    response_format={
-        "type": "image",
-        "mime_type": "image/jpeg",
-        "aspect_ratio": aspect_ratio,
-        "image_size": image_size,
-    },
-    timeout=120,
-)
-
-                    generated_image = interaction.output_image
-
-                    if not generated_image or not generated_image.data:
-                        raise RuntimeError(
-                            "The model did not return an image. "
-                            "Please try a different prompt."
+                        interaction = client.interactions.create(
+                            model="gemini-3.1-flash-image",
+                            input=image_input,
+                            response_format={
+                                "type": "image",
+                                "mime_type": "image/jpeg",
+                                "aspect_ratio": aspect_ratio,
+                                "image_size": image_size,
+                            },
+                            timeout=120,
                         )
 
-                    image_bytes = base64.b64decode(
-                        generated_image.data
-                    )
+                        generated_image = interaction.output_image
+
+                        if (
+                            not generated_image
+                            or not generated_image.data
+                        ):
+                            raise RuntimeError(
+                                "The model did not return an image. "
+                                "Please try a different prompt."
+                            )
+
+                        image_bytes = base64.b64decode(
+                            generated_image.data
+                        )
+                        image_mime_type = "image/jpeg"
 
                     st.session_state.image_history.insert(
                         0,
@@ -636,19 +689,18 @@ if st.session_state.current_page == "images":
                             "data": base64.b64encode(
                                 image_bytes
                             ).decode("utf-8"),
-                            "mime_type": "image/jpeg",
+                            "mime_type": image_mime_type,
                             "aspect_ratio": aspect_ratio,
                             "image_size": image_size,
                         },
                     )
 
-            
             except Exception as error:
                 error_message = str(error).lower()
 
                 if "timeout" in error_message or "timed out" in error_message:
                     st.error(
-                        "Image generation timed out after 120 seconds. "
+                        "Image generation timed out. "
                         "Please try again later."
                     )
                 else:
@@ -680,7 +732,7 @@ if st.session_state.current_page == "images":
         st.download_button(
             "⬇️ Download image",
             data=image_bytes,
-            file_name=f"cognexa_image_{index + 1}.jpg",
+            file_name=f"cognexa_image_{index + 1}.{'png' if image_item['mime_type'] == 'image/png' else 'jpg'}",
             mime=image_item["mime_type"],
             key=f"download_image_{index}",
             use_container_width=True,
@@ -688,6 +740,197 @@ if st.session_state.current_page == "images":
 
         st.divider()
 
+    st.stop()
+
+
+# Code Assistant workspace
+if st.session_state.current_page == "code_assistant":
+    st.title("💻 Code Assistant")
+    st.caption("Generate, explain, debug, and improve code with Gemini.")
+
+    if st.button("← Back to Chat", key="code_back_to_chat"):
+        st.session_state.current_page = "chat"
+        st.rerun()
+
+    st.divider()
+
+    task = st.selectbox(
+        "What would you like to do?",
+        ["Generate code", "Explain code", "Debug errors", "Improve code"],
+        key="code_assistant_task",
+    )
+
+    language = st.selectbox(
+        "Programming language",
+        [
+            "Python", "JavaScript", "TypeScript", "Java", "C#",
+            "C++", "Go", "Rust", "SQL", "PowerShell", "Bash",
+            "HTML/CSS", "Ansible", "Other",
+        ],
+        key="code_assistant_language",
+    )
+
+    request = st.text_area(
+        "Describe what you need",
+        placeholder="Describe the program, explain your goal, or paste the error message...",
+        height=120,
+        key="code_assistant_request",
+    )
+
+    source_code = st.text_area(
+        "Your existing code (not required for Generate code)",
+        placeholder="Paste your code here...",
+        height=220,
+        key="code_assistant_source",
+    )
+
+    if st.button(
+        "✨ Run Code Assistant",
+        type="primary",
+        use_container_width=True,
+        key="run_code_assistant",
+    ):
+        if client is None:
+            st.error("Gemini is unavailable. Check your GEMINI_API_KEY configuration.")
+        elif not request.strip():
+            st.warning("Please describe what you want the Code Assistant to do.")
+        elif task != "Generate code" and not source_code.strip():
+            st.warning("Please paste your existing code for this task.")
+        else:
+            prompt = f"""
+You are Cognexa AI's programming assistant.
+
+Task: {task}
+Programming language: {language}
+
+User's requirements or error description:
+{request}
+
+Existing code:
+{source_code if source_code.strip() else "No existing code provided."}
+
+Instructions:
+- For Generate code, provide a complete solution where practical.
+- For Explain code, explain the code clearly, step by step.
+- For Debug errors, identify likely causes and provide corrected code.
+- For Improve code, suggest improvements while preserving intended behavior.
+- Use Markdown headings and fenced code blocks for code.
+- Explain important changes and assumptions.
+- If essential information is missing, state your assumptions.
+- Never claim you executed or tested code unless you actually did.
+- Do not execute the supplied code.
+"""
+
+            try:
+                with st.spinner("Cognexa AI is working on your code..."):
+                    response = client.models.generate_content(
+                        model=MODEL,
+                        contents=prompt,
+                    )
+
+                answer = response.text
+
+                if answer:
+                    st.session_state.code_assistant_result = answer
+                    st.success("Code Assistant completed!")
+                else:
+                    st.error("Gemini returned an empty response.")
+
+            except Exception as error:
+                st.error(f"Code Assistant failed: {error}")
+
+    result = st.session_state.get("code_assistant_result")
+
+
+    if result:
+        st.divider()
+        st.subheader("Result")
+
+        extension_map = {
+            "Python": "py",
+            "JavaScript": "js",
+            "TypeScript": "ts",
+            "Java": "java",
+            "C#": "cs",
+            "C++": "cpp",
+            "Go": "go",
+            "Rust": "rs",
+            "SQL": "sql",
+            "PowerShell": "ps1",
+            "Bash": "sh",
+            "HTML/CSS": "html",
+            "Ansible": "yml",
+            "Other": "txt",
+        }
+
+        language_aliases = {
+            "python": "python", "py": "python",
+            "javascript": "javascript", "js": "javascript",
+            "typescript": "typescript", "ts": "typescript",
+            "java": "java", "csharp": "csharp", "cs": "csharp",
+            "cpp": "cpp", "c++": "cpp", "go": "go",
+            "rust": "rust", "sql": "sql",
+            "powershell": "powershell", "ps1": "powershell",
+            "bash": "bash", "sh": "bash", "html": "html",
+            "css": "css", "yaml": "yaml", "yml": "yaml",
+            "json": "json", "xml": "xml",
+        }
+
+        parts = result.split("```")
+        has_code = False
+        code_number = 0
+
+        for index, part in enumerate(parts):
+            if index % 2 == 0:
+                if part.strip():
+                    st.markdown(part)
+            else:
+                lines = part.splitlines()
+                code_text = part.strip("\n")
+                fence_language = ""
+
+                if lines:
+                    first_line = lines[0].strip().lower()
+                    first_word = first_line.split()[0] if first_line else ""
+
+                    if first_word in language_aliases:
+                        fence_language = language_aliases[first_word]
+                        code_text = "\n".join(lines[1:]).strip("\n")
+
+                if code_text.strip():
+                    has_code = True
+                    code_number += 1
+
+                    display_language = (
+                        fence_language
+                        or language_aliases.get(language.lower(), "")
+                    )
+
+                    st.code(
+                        code_text,
+                        language=display_language or None,
+                        line_numbers=True,
+                    )
+
+                    extension = extension_map.get(language, "txt")
+
+                    st.download_button(
+                        "⬇️ Download code file",
+                        data=code_text,
+                        file_name=f"cognexa_code_{code_number}.{extension}",
+                        mime="text/plain",
+                        key=f"download_code_block_{code_number}",
+                    )
+
+        if not has_code:
+            st.info("No formatted code block was detected.")
+            st.download_button(
+                "⬇️ Download full response",
+                data=result,
+                file_name="cognexa_code_assistant_result.md",
+                mime="text/markdown",
+                key="download_code_response_markdown",
+            )
     st.stop()
 
 # Display conversation
@@ -757,7 +1000,7 @@ def submit_message(text, attachments):
 
         contents.append(types.Content(role=role, parts=parts))
 
-    
+
     try:
         with st.spinner("Cognexa AI is thinking..."):
             if client is None:
