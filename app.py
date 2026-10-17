@@ -1,4 +1,4 @@
-﻿
+
 import base64
 import csv
 import io
@@ -286,70 +286,116 @@ except Exception:
     st.stop()
 
 
+
 def extract_text(data, name):
     suffix = Path(name).suffix.lower()
+    truncation_note = (
+        "\n\n[NOTICE: Only part of this file was extracted. "
+        "Do not assume the unprocessed content was reviewed.]"
+    )
 
     if suffix in TEXT_EXTENSIONS or name.lower() == ".gitignore":
-        return data.decode("utf-8-sig", errors="replace")[:MAX_TEXT_CHARS]
+        result = data.decode("utf-8-sig", errors="replace")
+        if len(result) > MAX_TEXT_CHARS:
+            return result[:MAX_TEXT_CHARS] + truncation_note
+        return result
 
     if suffix == ".pdf":
         reader = PdfReader(io.BytesIO(data))
         pages = []
+        page_limit_reached = len(reader.pages) > 100
+
         for page in reader.pages[:100]:
             pages.append(page.extract_text() or "")
+
         result = "\n".join(pages).strip()
 
         # Scanned PDFs may need image/OCR processing.
         if not result:
             return None
-        return result[:MAX_TEXT_CHARS]
+
+        truncated = page_limit_reached or len(result) > MAX_TEXT_CHARS
+        result = result[:MAX_TEXT_CHARS]
+
+        if truncated:
+            result += truncation_note
+        return result
 
     if suffix == ".docx":
         document = Document(io.BytesIO(data))
         paragraphs = [p.text for p in document.paragraphs if p.text]
+
         for table in document.tables:
             for row in table.rows:
                 paragraphs.append(" | ".join(cell.text for cell in row.cells))
-        return "\n".join(paragraphs)[:MAX_TEXT_CHARS]
+
+        result = "\n".join(paragraphs)
+        if len(result) > MAX_TEXT_CHARS:
+            return result[:MAX_TEXT_CHARS] + truncation_note
+        return result
 
     if suffix == ".xlsx":
         workbook = load_workbook(
             io.BytesIO(data), read_only=True, data_only=True
         )
         output = []
+        row_limit_reached = False
+
         try:
             for sheet in workbook.worksheets:
                 output.append(f"Sheet: {sheet.title}")
+
                 for row in sheet.iter_rows(values_only=True):
                     values = ["" if v is None else str(v) for v in row]
+
                     if any(values):
                         output.append(" | ".join(values))
+
                     if len(output) >= 2000:
-                        output.append("[Workbook output truncated]")
+                        row_limit_reached = True
                         break
-                if len(output) >= 2000:
+
+                if row_limit_reached:
                     break
         finally:
             workbook.close()
-        return "\n".join(output)[:MAX_TEXT_CHARS]
+
+        result = "\n".join(output)
+        char_limit_reached = len(result) > MAX_TEXT_CHARS
+        result = result[:MAX_TEXT_CHARS]
+
+        if row_limit_reached or char_limit_reached:
+            result += truncation_note
+        return result
 
     if suffix == ".pptx":
         presentation = Presentation(io.BytesIO(data))
         slides = []
+        slide_limit_reached = len(presentation.slides) > 100
+
         for number, slide in enumerate(presentation.slides[:100], 1):
             lines = [f"Slide {number}"]
+
             for shape in slide.shapes:
                 if getattr(shape, "has_text_frame", False):
                     if shape.text.strip():
                         lines.append(shape.text.strip())
+
                 if getattr(shape, "has_table", False):
                     for row in shape.table.rows:
                         lines.append(" | ".join(c.text for c in row.cells))
+
             slides.append("\n".join(lines))
-        return "\n".join(slides)[:MAX_TEXT_CHARS]
+
+        result = "\n".join(slides)
+        truncated = slide_limit_reached or len(result) > MAX_TEXT_CHARS
+        result = result[:MAX_TEXT_CHARS]
+
+        if truncated:
+            result += truncation_note
+        return result
 
     return None
-
 
 def extract_zip(data, name):
     output = []
