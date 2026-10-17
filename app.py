@@ -933,21 +933,59 @@ Instructions:
             )
     st.stop()
 
+
 # Display conversation
 active_chat = get_active_chat()
 
 if active_chat is not None:
     for message in active_chat["messages"]:
-          with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        with st.chat_message(message["role"]):
+            content = message["content"]
+            st.markdown(content)
+
+            # Show a real download button for explicitly named text files.
+            if message["role"] == "assistant":
+                import re
+
+                file_pattern = (
+                    r"```text-file:([A-Za-z0-9_.-]+\.txt)\s*\n"
+                    r"(.*?)"
+                    r"\n```"
+                )
+
+                for file_index, match in enumerate(
+                    re.finditer(file_pattern, content, re.DOTALL)
+                ):
+                    file_name = match.group(1)
+                    file_content = match.group(2)
+
+                    st.download_button(
+                        label=f"📥 Download {file_name}",
+                        data=file_content.encode("utf-8"),
+                        file_name=file_name,
+                        mime="text/plain",
+                        key=(
+                            f"chat_file_{st.session_state.active_chat_id}_"
+                            f"{id(message)}_{file_index}"
+                        ),
+                    )
 
             if message["role"] == "assistant" and message.get("model_used"):
                 st.caption(f"Powered by {message['model_used']}")
 
             for attachment in message.get("attachments", []):
-                mime_type = attachment["mime_type"]
-                data = attachment["data"]
-                name = attachment["name"]
+                mime_type = attachment.get(
+                    "mime_type", "application/octet-stream"
+                )
+                data = attachment.get("data")
+                name = attachment.get("name", "attachment")
+
+                if data is None:
+                    st.caption(
+                        f"📎 Attached: {name} "
+                        "(file contents are not available in this saved message)"
+                    )
+                    continue
 
                 if mime_type.startswith("image/"):
                     st.image(data, caption=name, use_container_width=True)
@@ -988,18 +1026,50 @@ def submit_message(text, attachments):
         "attachments": attachments,
     }
 
+
     contents = []
+
+    import re
+
+    wants_downloadable_file = bool(
+        re.search(
+            r"\b(download|downloadable|add lines|modify|edit the file|"
+            r"update the file|create a file|return the file|"
+            r"give me the file|save as)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
     # Prepare the full conversation, including the new message.
     for message in active["messages"] + [user_message]:
-        role = "user" if message["role"] == "user" else "model"
+        role = "user" if message["role"] == "assistant" else message["role"]
+        role = "model" if role == "assistant" else role
         parts = [types.Part.from_text(text=message["content"])]
 
+        if message is user_message and wants_downloadable_file:
+            parts.append(
+                types.Part.from_text(
+                    text=(
+                        "IMPORTANT: Return a real downloadable text file, "
+                        "not manual-save instructions. Return the COMPLETE "
+                        "file contents in exactly this format:\n"
+                        "```text-file:Test_file_this.txt\n"
+                        "COMPLETE FILE CONTENT HERE\n"
+                        "```\n"
+                        "Use the appropriate .txt filename. Preserve all "
+                        "existing content when modifying an uploaded file. "
+                        "Do not omit any content."
+                    )
+                )
+            )
+
         for attachment in message.get("attachments", []):
+            if "data" not in attachment:
+                continue
             parts.extend(attachment_parts(attachment))
 
         contents.append(types.Content(role=role, parts=parts))
-
 
     try:
         with st.spinner("Cognexa AI is thinking..."):
